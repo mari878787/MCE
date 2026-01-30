@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.env
+.DS_Store
+coverage/
+npm-debug.log
+yarn-error.log
+.idea/
+.vscode/
+*.log
+.wwebjs_auth/
+session/
+.session/
+.wwebjs_cache/
