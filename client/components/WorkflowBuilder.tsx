@@ -47,7 +47,7 @@ const getId = () => `dndnode_${id++}`;
 
 export default function WorkflowBuilder({ workflowId }: { workflowId: string }) {
     return (
-        <div className="flex h-[calc(100vh-64px)] w-full bg-black">
+        <div className="flex h-[calc(100vh-64px)] w-full bg-background">
             <ReactFlowProvider>
                 <WorkflowSidebar />
                 <WorkflowCanvas workflowId={workflowId} />
@@ -204,7 +204,7 @@ function WorkflowCanvas({ workflowId }: { workflowId: string }) {
             <div className="absolute top-4 right-4 z-10 flex gap-2">
                 <button
                     onClick={handleSave}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-lg text-sm font-medium transition"
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded shadow-lg text-sm font-medium transition"
                 >
                     Save Workflow
                 </button>
@@ -234,11 +234,11 @@ function WorkflowCanvas({ workflowId }: { workflowId: string }) {
                     edgeTypes={edgeTypes}
                     defaultEdgeOptions={{ type: 'custom', animated: true }}
                     fitView
-                    className="bg-gray-900"
+                    className="bg-background-muted" // Use a muted background for the canvas
                 >
-                    <Controls className="bg-white text-black" />
-                    <MiniMap className="bg-gray-800" />
-                    <Background gap={12} size={1} />
+                    <Controls className="bg-Card text-foreground shadow-md border-border" />
+                    <MiniMap className="bg-card border-border" />
+                    <Background gap={12} size={1} color="rgba(0,0,0,0.1)" />
                 </ReactFlow>
             </div>
         </div>

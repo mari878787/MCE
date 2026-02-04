@@ -46,60 +46,54 @@ export default function PerformanceChart() {
     }, []);
 
     if (loading) return (
-        <div className="glass-panel p-6 rounded-2xl h-[400px] flex items-center justify-center text-gray-500">
-            Loading metrics...
+        <div className="h-[400px] flex items-center justify-center text-gray-400 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+            Scanning metrics...
         </div>
     );
 
     if (data.length === 0) return (
-        <div className="glass-panel p-6 rounded-2xl h-[400px] flex items-center justify-center text-gray-500 flex-col gap-2">
-            <p>No campaign data yet.</p>
-            <p className="text-xs">Start a campaign to see performance metrics.</p>
+        <div className="h-[400px] flex items-center justify-center text-gray-500 flex-col gap-2 bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+            <p className="font-medium">No campaign data yet.</p>
+            <p className="text-xs text-gray-400">Launch a campaign to track performance here.</p>
         </div>
     );
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="glass-panel p-6 rounded-2xl h-[400px] flex flex-col"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5 }}
+            className="w-full h-[400px]"
         >
-            <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-semibold text-white">Campaign Performance</h3>
-            </div>
-
-            <div className="flex-1 w-full min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                        <XAxis
-                            dataKey="name"
-                            stroke="#9ca3af"
-                            fontSize={12}
-                            tickLine={false}
-                            axisLine={false}
-                            dy={10}
-                        />
-                        <YAxis
-                            stroke="#9ca3af"
-                            fontSize={12}
-                            tickLine={false}
-                            axisLine={false}
-                            dx={-10}
-                        />
-                        <Tooltip
-                            contentStyle={{ backgroundColor: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                            itemStyle={{ color: '#fff' }}
-                            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                        />
-                        <Legend />
-                        <Bar dataKey="Sent" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                        <Bar dataKey="Read" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                        <Bar dataKey="Interested" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                    </BarChart>
-                </ResponsiveContainer>
-            </div>
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data} margin={{ top: 20, right: 0, left: -20, bottom: 0 }} barCategoryGap="20%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                    <XAxis
+                        dataKey="name"
+                        stroke="#9ca3af"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        dy={10}
+                    />
+                    <YAxis
+                        stroke="#9ca3af"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        dx={-10}
+                    />
+                    <Tooltip
+                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
+                        itemStyle={{ color: '#111827', fontSize: '12px', fontWeight: 500 }}
+                        cursor={{ fill: '#f9fafb' }}
+                    />
+                    <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                    <Bar dataKey="Sent" name="Sent" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                    <Bar dataKey="Read" name="Read" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                    <Bar dataKey="Interested" name="Leads" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                </BarChart>
+            </ResponsiveContainer>
         </motion.div>
     );
 }

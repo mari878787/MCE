@@ -6,7 +6,7 @@ const db = require('../db');
 // GET /api/workflows
 router.get('/', async (req, res) => {
     try {
-        const result = await db.query('SELECT * FROM workflows ORDER BY created_at DESC');
+        const result = await db.query('SELECT * FROM workflows WHERE organization_id = ? ORDER BY created_at DESC', [req.user.organization_id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
     const { id } = req.params;
     try {
-        const wf = await db.query('SELECT * FROM workflows WHERE id = ?', [id]);
+        const wf = await db.query('SELECT * FROM workflows WHERE id = ? AND organization_id = ?', [id, req.user.organization_id]);
         if (wf.rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
         const nodes = await db.query('SELECT * FROM workflow_nodes WHERE workflow_id = ?', [id]);
@@ -53,14 +53,14 @@ router.post('/', async (req, res) => {
 
     try {
         // Upsert Workflow
-        const existing = await db.query('SELECT id FROM workflows WHERE id = ?', [wfId]);
+        const existing = await db.query('SELECT id FROM workflows WHERE id = ? AND organization_id = ?', [wfId, req.user.organization_id]);
         if (existing.rows.length > 0) {
-            await db.query('UPDATE workflows SET name = ? WHERE id = ?', [name, wfId]);
+            await db.query('UPDATE workflows SET name = ? WHERE id = ? AND organization_id = ?', [name, wfId, req.user.organization_id]);
             // Clear old nodes/edges to replace (simple sync)
             await db.query('DELETE FROM workflow_nodes WHERE workflow_id = ?', [wfId]);
             await db.query('DELETE FROM workflow_edges WHERE workflow_id = ?', [wfId]);
         } else {
-            await db.query('INSERT INTO workflows (id, name, status) VALUES (?, ?, ?)', [wfId, name, 'ACTIVE']);
+            await db.query('INSERT INTO workflows (id, name, status, organization_id) VALUES (?, ?, ?, ?)', [wfId, name, 'ACTIVE', req.user.organization_id]);
         }
 
         // Insert Nodes
@@ -98,8 +98,8 @@ router.put('/:id', async (req, res) => {
                 name = COALESCE(?, name), 
                 status = COALESCE(?, status),
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`,
-            [name, status, id]
+            WHERE id = ? AND organization_id = ?`,
+            [name, status, id, req.user.organization_id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -111,10 +111,14 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
     const { id } = req.params;
     try {
+        // Check ownership first
+        const check = await db.query('SELECT id FROM workflows WHERE id = ? AND organization_id = ?', [id, req.user.organization_id]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
         await db.query('BEGIN TRANSACTION');
         await db.query('DELETE FROM workflow_edges WHERE workflow_id = ?', [id]);
         await db.query('DELETE FROM workflow_nodes WHERE workflow_id = ?', [id]);
-        await db.query('DELETE FROM workflows WHERE id = ?', [id]);
+        await db.query('DELETE FROM workflows WHERE id = ? AND organization_id = ?', [id, req.user.organization_id]);
         await db.query('COMMIT');
         res.json({ success: true });
     } catch (err) {

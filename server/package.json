@@ -10,12 +10,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "biz-sdk": "^0.3.27",
     "bullmq": "^5.66.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "google-libphonenumber": "^3.2.43",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
@@ -23,6 +26,6 @@
     "sqlite3": "^5.1.7",
     "twilio": "^5.10.7",
     "uuid": "^13.0.0",
-    "whatsapp-web.js": "^1.34.2"
+    "whatsapp-web.js": "^1.34.6"
   }
 }

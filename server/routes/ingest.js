@@ -77,8 +77,8 @@ router.post('/ingest', async (req, res) => {
         const leadId = uuidv4();
         try {
             const insertQuery = `
-        INSERT INTO leads (id, name, phone, email, source, status, score, tags, tracking_dna, metadata, assigned_to)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (id, name, phone, email, source, status, score, tags, tracking_dna, metadata, assigned_to, organization_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
             const values = [
                 leadId,
@@ -91,13 +91,36 @@ router.post('/ingest', async (req, res) => {
                 JSON.stringify(standardizedLead.tags),
                 JSON.stringify(standardizedLead.tracking_dna),
                 JSON.stringify(standardizedLead.metadata),
-                assignedUserId
+                assignedUserId,
+                1 // TODO: Dynamic Org ID from API Key or Webhook param. Defaulting to 1.
             ];
 
             await db.query(insertQuery, values);
 
         } catch (dbError) {
             console.warn('DB Insert Failed:', dbError.message);
+        }
+
+        // 6. CAPI Trigger - Lead Event
+        // Only fire if not coming directly from Facebook (deduplication)
+        // This captures Website Leads (WordPress, ClickFunnels, etc.)
+        if (standardizedLead.source !== 'facebook_lead_ads') {
+            try {
+                const facebookCapiService = require('../services/facebook_capi'); // Lazy load
+                const eventData = {
+                    email: standardizedLead.email,
+                    phone: standardizedLead.phone,
+                    fbp: standardizedLead.tracking_dna.fbp,
+                    fbc: standardizedLead.tracking_dna.fbc,
+                    ip: req.ip || req.headers['x-forwarded-for'] || '',
+                    userAgent: req.headers['user-agent'] || '',
+                    sourceUrl: req.headers['referer'] || '',
+                    value: 0.00,
+                    currency: 'USD'
+                };
+                // Default to Org ID 1 as per current ingest logic
+                facebookCapiService.sendEvent('Lead', eventData, 1);
+            } catch (capiErr) { console.error('CAPI Ingest Error:', capiErr.message); }
         }
 
         // 5. Respond

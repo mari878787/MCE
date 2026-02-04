@@ -33,10 +33,13 @@ router.post('/logout', async (req, res) => {
 
 // GET /api/whatsapp/chats
 router.get('/chats', async (req, res) => {
+    console.log('[DEBUG] GET /api/whatsapp/chats Request received');
     try {
         const chats = await whatsappService.getLiveChats();
+        console.log(`[DEBUG] GET /api/whatsapp/chats returning ${chats.length} chats`);
         res.json(chats);
     } catch (error) {
+        console.error('[DEBUG] GET /api/whatsapp/chats failed:', error);
         res.status(500).json({ error: 'Failed to fetch chats' });
     }
 });
@@ -163,6 +166,83 @@ router.post('/sync', async (req, res) => {
         res.json({ success: true, ...result });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/whatsapp/bulk-send
+router.post('/bulk-send', async (req, res) => {
+    const { leadIds, message, templateId } = req.body;
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: 'No leads selected' });
+    }
+    if (!message && !templateId) {
+        return res.status(400).json({ error: 'Message content is required' });
+    }
+
+    try {
+        console.log(`[BULK] Starting bulk send for ${leadIds.length} leads`);
+
+        // 1. Fetch Leads to get phone numbers
+        // Note: sqlite3 'IN' clause handling can be tricky with parameterized queries, so we construct it.
+        const placeholders = leadIds.map(() => '?').join(',');
+        const query = `SELECT id, name, phone FROM leads WHERE id IN (${placeholders}) AND organization_id = ?`;
+        const params = [...leadIds, req.user.organization_id];
+
+        const leads = await new Promise((resolve, reject) => {
+            db.all(query, params, (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows);
+            });
+        });
+
+        if (leads.length === 0) {
+            return res.status(404).json({ error: 'No valid leads found' });
+        }
+
+        // 2. Process Sending (Async - don't wait for all to finish to respond)
+        let sentCount = 0;
+        let failedCount = 0;
+
+        // Respond immediately that the job has started
+        res.json({ success: true, message: `Queued ${leads.length} messages` });
+
+        // Run in background
+        (async () => {
+            for (const lead of leads) {
+                if (!lead.phone) {
+                    console.log(`[BULK] Skipping lead ${lead.name} (No phone)`);
+                    failedCount++;
+                    continue;
+                }
+
+                // Personalize
+                let finalMsg = message.replace(/{name}/g, lead.name || 'there');
+
+                try {
+                    // Format phone (remove +, spaces, etc)
+                    let phone = lead.phone.replace(/\D/g, '');
+                    if (!phone.endsWith('@c.us')) phone += '@c.us';
+
+                    await whatsappService.sendMessage(phone, finalMsg);
+                    sentCount++;
+                    console.log(`[BULK] Sent to ${lead.name}`);
+
+                    // Delay to be safe (random 2-5 seconds)
+                    const delay = Math.floor(Math.random() * 3000) + 2000;
+                    await new Promise(r => setTimeout(r, delay));
+
+                } catch (e) {
+                    console.error(`[BULK] Failed to send to ${lead.name}:`, e.message);
+                    failedCount++;
+                }
+            }
+            console.log(`[BULK] Job Complete. Sent: ${sentCount}, Failed: ${failedCount}`);
+        })();
+
+    } catch (err) {
+        console.error('[BULK] Error:', err);
+        // If response wasn't sent yet
+        if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     }
 });
 

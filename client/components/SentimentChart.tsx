@@ -45,7 +45,7 @@ export default function SentimentChart() {
             animate={{ opacity: 1, scale: 1 }}
             className="glass-panel p-6 rounded-2xl border border-white/10 flex flex-col items-center"
         >
-            <h3 className="text-lg font-semibold text-white mb-2 self-start flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2 self-start flex items-center gap-2">
                 <span className="text-2xl">🧠</span> AI Sentiment Analysis
             </h3>
             <p className="text-xs text-gray-500 self-start mb-6">Automated tone detection of inbound replies.</p>

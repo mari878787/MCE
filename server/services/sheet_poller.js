@@ -40,28 +40,38 @@ async function syncNow() {
         s.pipe(csv())
             .on('data', (data) => results.push(data))
             .on('end', async () => {
-                let newLeads = 0;
-                for (const row of results) {
-                    try {
-                        const name = row.name || row.Name || row['Full Name'] || row.full_name || 'Unknown';
-                        const phone = row.phone || row.Phone || row.Mobile || row['Phone Number'] || row.phone_number || null;
-                        const email = row.email || row.Email || null;
+                try {
+                    let newLeads = 0;
+                    // Default to org 1 for auto-sync if context missing
+                    const DEFAULT_ORG = '1';
 
-                        if (!phone) continue;
+                    for (const row of results) {
+                        try {
+                            const name = row.name || row.Name || row['Full Name'] || row.full_name || 'Unknown';
+                            const phone = row.phone || row.Phone || row.Mobile || row['Phone Number'] || row.phone_number || null;
+                            const email = row.email || row.Email || null;
 
-                        const exist = await db.query('SELECT id FROM leads WHERE phone = ?', [phone]);
-                        if (exist.rows.length === 0) {
-                            const id = uuidv4();
-                            await db.query(
-                                'INSERT INTO leads (id, name, phone, email, source, status, score, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                                [id, name, phone, email, 'google_sheet_auto', 'NEW', 10, JSON.stringify(row), new Date().toISOString()]
-                            );
-                            newLeads++;
+                            if (!phone) continue;
+
+                            // Check existence within the org (or globally? For now per org)
+                            const exist = await db.query('SELECT id FROM leads WHERE phone = ? AND organization_id = ?', [phone, DEFAULT_ORG]);
+                            if (exist.rows.length === 0) {
+                                const id = uuidv4();
+                                await db.query(
+                                    'INSERT INTO leads (id, organization_id, name, phone, email, source, status, score, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                                    [id, DEFAULT_ORG, name, phone, email, 'google_sheet_auto', 'NEW', 10, JSON.stringify(row), new Date().toISOString()]
+                                );
+                                newLeads++;
+                            }
+                        } catch (e) {
+                            console.error('[SHEET POLLER] Row Error:', e.message);
                         }
-                    } catch (e) { /* ignore */ }
+                    }
+                    if (newLeads > 0) console.log(`[SHEET POLLER] Imported ${newLeads} new leads.`);
+                    saveConfig(config.url); // Update timestamp
+                } catch (err) {
+                    console.error('[SHEET POLLER] Stream Error:', err);
                 }
-                if (newLeads > 0) console.log(`[SHEET POLLER] Imported ${newLeads} new leads.`);
-                saveConfig(config.url); // Update timestamp
             });
     } catch (e) {
         console.error('[SHEET POLLER] Error:', e.message);

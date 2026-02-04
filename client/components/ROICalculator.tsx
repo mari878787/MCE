@@ -47,7 +47,7 @@ export default function ROICalculator() {
         >
             <div className="flex justify-between items-start mb-6">
                 <div>
-                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                         <span className="text-2xl">💰</span> ROI Calculator
                     </h3>
                     <p className="text-xs text-gray-500">Estimate campaign profitability.</p>

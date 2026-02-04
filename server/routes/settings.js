@@ -1,11 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const authMiddleware = require('../middleware/authMiddleware');
+
+router.use(authMiddleware);
 
 // GET /api/settings
 router.get('/', async (req, res) => {
     try {
-        const result = await db.query("SELECT key, value FROM settings");
+        const result = await db.query(
+            "SELECT key, value FROM settings WHERE organization_id = ?",
+            [req.user.organization_id]
+        );
         const settings = {};
         result.rows.forEach(row => {
             settings[row.key] = row.value;
@@ -26,13 +32,24 @@ router.post('/', async (req, res) => {
         }
 
         const parsedValue = String(value); // Ensure string
+        const orgId = req.user.organization_id;
 
-        // Upsert
-        const existing = await db.query("SELECT key FROM settings WHERE key = ?", [key]);
+        // Upsert (SQLite syntax compatible with Postgres ON CONFLICT mostly, but here using manual check for compatibility)
+        const existing = await db.query(
+            "SELECT key FROM settings WHERE key = ? AND organization_id = ?",
+            [key, orgId]
+        );
+
         if (existing.rows.length > 0) {
-            await db.query("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?", [parsedValue, key]);
+            await db.query(
+                "UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND organization_id = ?",
+                [parsedValue, key, orgId]
+            );
         } else {
-            await db.query("INSERT INTO settings (key, value) VALUES (?, ?)", [key, parsedValue]);
+            await db.query(
+                "INSERT INTO settings (key, value, organization_id) VALUES (?, ?, ?)",
+                [key, parsedValue, orgId]
+            );
         }
 
         res.json({ success: true, key, value: parsedValue });

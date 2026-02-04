@@ -4,11 +4,12 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { addJob } = require('../utils/queue');
+const authMiddleware = require('../middleware/authMiddleware');
 
 // GET /api/campaigns - List all campaigns
-router.get('/', async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
     try {
-        const result = await db.query('SELECT * FROM campaigns ORDER BY created_at DESC');
+        const result = await db.query('SELECT * FROM campaigns WHERE organization_id = ? ORDER BY created_at DESC', [req.user.organization_id]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -17,7 +18,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/campaigns - Create a new Multi-Step Campaign
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
     const { name, steps, target_filter, scheduled_at } = req.body;
     // steps = [{ type: 'WHATSAPP', content: 'Hi' }, { type: 'DELAY', content: '24' }]
 
@@ -32,8 +33,8 @@ router.post('/', async (req, res) => {
 
         // 1. Create Campaign
         await db.query(
-            'INSERT INTO campaigns (id, name, target_filter, status, scheduled_at) VALUES (?, ?, ?, ?, ?)',
-            [campaignId, name, target_filter || 'ALL', 'DRAFT', scheduled_at || null]
+            'INSERT INTO campaigns (id, name, target_filter, status, scheduled_at, organization_id) VALUES (?, ?, ?, ?, ?, ?)',
+            [campaignId, name, target_filter || 'ALL', 'DRAFT', scheduled_at || null, req.user.organization_id]
         );
 
         // 2. Create Steps
@@ -61,12 +62,12 @@ router.post('/:id/start', async (req, res) => {
     const { id } = req.params;
 
     try {
-        const campRes = await db.query('SELECT * FROM campaigns WHERE id = ?', [id]);
+        const campRes = await db.query('SELECT * FROM campaigns WHERE id = ? AND organization_id = ?', [id, req.user.organization_id]);
         if (campRes.rows.length === 0) return res.status(404).json({ error: 'Campaign not found' });
 
         // Select Leads
-        let sql = 'SELECT * FROM leads WHERE stopped_automation = 0';
-        const leadsRes = await db.query(sql);
+        let sql = 'SELECT * FROM leads WHERE stopped_automation = 0 AND organization_id = ?';
+        const leadsRes = await db.query(sql, [req.user.organization_id]);
         const leads = leadsRes.rows;
 
         if (leads.length === 0) return res.status(400).json({ error: 'No eligible leads found' });

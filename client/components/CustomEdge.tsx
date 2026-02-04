@@ -41,7 +41,7 @@ export default function CustomEdge({
                     className="nodrag nopan"
                 >
                     <button
-                        className="w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-xs shadow-md border border-white transition-colors"
+                        className="w-5 h-5 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-full flex items-center justify-center text-xs shadow-sm border border-border transition-colors cursor-pointer"
                         onClick={onEdgeClick}
                         aria-label="Delete edge"
                     >

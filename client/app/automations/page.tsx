@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Play, Settings, Plus, GitBranch, Zap } from 'lucide-react';
+import { Sparkles, Play, Settings, Plus, GitBranch, Zap, Trash2 } from 'lucide-react';
 
 export default function AutomationsPage() {
     const router = useRouter();
@@ -20,6 +20,41 @@ export default function AutomationsPage() {
         // We'll handle 'new' in the builder or create a UUID here
         const newId = crypto.randomUUID();
         router.push(`/automations/${newId}`);
+    };
+
+    const handleDelete = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        if (!confirm('Are you sure you want to delete this workflow? This cannot be undone.')) return;
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/workflows/${id}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                setWorkflows(prev => prev.filter(w => w.id !== id));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleToggleStatus = async (e: React.MouseEvent, wf: any) => {
+        e.stopPropagation();
+        const newStatus = wf.status === 'ACTIVE' ? 'DRAFT' : 'ACTIVE';
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/workflows/${wf.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+
+            if (res.ok) {
+                setWorkflows(prev => prev.map(w => w.id === wf.id ? { ...w, status: newStatus } : w));
+            }
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     return (
@@ -44,19 +79,34 @@ export default function AutomationsPage() {
                     <div
                         key={wf.id}
                         onClick={() => router.push(`/automations/${wf.id}`)}
-                        className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-blue-500/50 transition cursor-pointer group"
+                        className="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-blue-500/50 transition cursor-pointer group relative"
                     >
                         <div className="flex justify-between items-start mb-4">
                             <div className="bg-blue-900/40 p-2 rounded-lg group-hover:bg-blue-800/60 transition">
                                 <GitBranch className="w-6 h-6 text-blue-400" />
                             </div>
-                            <span className={`px-2 py-1 rounded text-xs font-semibold ${wf.status === 'ACTIVE' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}`}>
-                                {wf.status || 'DRAFT'}
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={(e) => handleToggleStatus(e, wf)}
+                                    className={`px-2 py-1 rounded text-xs font-semibold transition-colors border ${wf.status === 'ACTIVE'
+                                        ? 'bg-green-900/30 text-green-400 border-green-900/50 hover:bg-green-900/50'
+                                        : 'bg-yellow-900/30 text-yellow-400 border-yellow-900/50 hover:bg-yellow-900/50'}`}
+                                    title={wf.status === 'ACTIVE' ? 'Click to Deactivate' : 'Click to Activate'}
+                                >
+                                    {wf.status || 'DRAFT'}
+                                </button>
+                                <button
+                                    onClick={(e) => handleDelete(e, wf.id)}
+                                    className="p-1 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"
+                                    title="Delete Workflow"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
                         </div>
 
                         <h3 className="text-lg font-bold mb-2 text-white">{wf.name}</h3>
-                        <p className="text-sm text-gray-500 line-clamp-2 mb-4">
+                        <p className="text-sm text-gray-500 line-clamp-2 mb-4 h-10">
                             {wf.description || 'No description provided.'}
                         </p>
 

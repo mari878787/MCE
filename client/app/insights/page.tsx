@@ -8,9 +8,9 @@ import ROICalculator from '../../components/ROICalculator';
 
 export default function InsightsPage() {
     return (
-        <div className="p-8 text-white max-w-7xl mx-auto h-full overflow-y-auto">
+        <div className="p-8 text-gray-900 max-w-7xl mx-auto h-full overflow-y-auto">
             <h1 className="text-3xl font-bold mb-2">Deep Insights</h1>
-            <p className="text-gray-400 mb-8">Analyze conversion funnels, database growth, and audience health.</p>
+            <p className="text-gray-600 mb-8">Analyze conversion funnels, database growth, and audience health.</p>
 
             {/* Row 1: Funnel & Growth */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">

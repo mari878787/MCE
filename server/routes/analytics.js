@@ -1,24 +1,36 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const authMiddleware = require('../middleware/authMiddleware');
+
+router.use(authMiddleware);
 
 // GET /api/analytics/whatsapp
 router.get('/whatsapp', async (req, res) => {
     try {
+        const orgId = req.user.organization_id;
+
         const msgVolume = await db.query(
-            "SELECT COUNT(*) as count FROM messages WHERE type = 'whatsapp' AND direction = 'outbound'"
+            `SELECT COUNT(m.id) as count 
+             FROM messages m 
+             JOIN leads l ON m.lead_id = l.id 
+             WHERE m.type = 'whatsapp' AND m.direction = 'outbound' AND l.organization_id = ?`,
+            [orgId]
         );
 
         const stoppedLeads = await db.query(
-            "SELECT COUNT(*) as count FROM leads WHERE stopped_automation = 1"
+            "SELECT COUNT(*) as count FROM leads WHERE stopped_automation = 1 AND organization_id = ?",
+            [orgId]
         );
 
         const pendingLeads = await db.query(
-            "SELECT COUNT(*) as count FROM leads WHERE status = 'NEW'"
+            "SELECT COUNT(*) as count FROM leads WHERE status = 'NEW' AND organization_id = ?",
+            [orgId]
         );
 
         const recentStops = await db.query(
-            "SELECT name, phone, last_message_sent_at FROM leads WHERE stopped_automation = 1 ORDER BY updated_at DESC LIMIT 5"
+            "SELECT name, phone, last_message_sent_at FROM leads WHERE stopped_automation = 1 AND organization_id = ? ORDER BY updated_at DESC LIMIT 5",
+            [orgId]
         );
 
         res.json({
@@ -41,10 +53,10 @@ router.get('/growth', async (req, res) => {
                 DATE(created_at) as date,
                 COUNT(*) as leads
             FROM leads 
-            WHERE created_at > DATE('now', '-30 days')
+            WHERE created_at > DATE('now', '-30 days') AND organization_id = ?
             GROUP BY DATE(created_at)
             ORDER BY date ASC
-        `);
+        `, [req.user.organization_id]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -55,13 +67,15 @@ router.get('/growth', async (req, res) => {
 // GET /api/analytics/funnel - Conversion Funnel
 router.get('/funnel', async (req, res) => {
     try {
+        const orgId = req.user.organization_id;
         const stats = await db.query(`
             SELECT 
-                (SELECT COUNT(*) FROM leads) as total,
-                (SELECT COUNT(*) FROM leads WHERE status IN ('CONTACTED', 'INTERESTED', 'CUSTOMER')) as contacted,
-                (SELECT COUNT(*) FROM leads WHERE status IN ('INTERESTED', 'CUSTOMER')) as interested,
-                (SELECT COUNT(*) FROM leads WHERE status = 'CUSTOMER') as customer
-        `);
+                (SELECT COUNT(*) FROM leads WHERE organization_id = ?) as total,
+                (SELECT COUNT(*) FROM leads WHERE status IN ('CONTACTED', 'INTERESTED', 'CUSTOMER') AND organization_id = ?) as contacted,
+                (SELECT COUNT(*) FROM leads WHERE status IN ('INTERESTED', 'CUSTOMER') AND organization_id = ?) as interested,
+                (SELECT COUNT(*) FROM leads WHERE status = 'CUSTOMER' AND organization_id = ?) as customer
+        `, [orgId, orgId, orgId, orgId]);
+
         const idx = stats.rows[0];
 
         // Format for Recharts Funnel
@@ -84,15 +98,18 @@ router.get('/sentiment', async (req, res) => {
     try {
         const result = await db.query(`
             SELECT 
-                sentiment, 
-                COUNT(*) as count 
-            FROM messages 
+                m.sentiment, 
+                COUNT(m.id) as count 
+            FROM messages m
+            JOIN leads l ON m.lead_id = l.id
             WHERE 
-                direction = 'inbound' 
-                AND sentiment IS NOT NULL 
-                AND created_at > DATE('now', '-30 days')
-            GROUP BY sentiment
-        `);
+                m.direction = 'inbound' 
+                AND m.sentiment IS NOT NULL 
+                AND m.created_at > DATE('now', '-30 days')
+                AND l.organization_id = ?
+            GROUP BY m.sentiment
+        `, [req.user.organization_id]);
+
         // Format: { positive: 10, negative: 2, neutral: 5 }
         const data = { POSITIVE: 0, NEGATIVE: 0, NEUTRAL: 0 };
         result.rows.forEach(row => {
@@ -110,19 +127,19 @@ router.get('/sentiment', async (req, res) => {
 // GET /api/analytics/heatmap
 router.get('/heatmap', async (req, res) => {
     try {
-        // SQLite: strftime('%w', created_at) -> 0-6 (Sun-Sat)
-        // SQLite: strftime('%H', created_at) -> 00-23
         const result = await db.query(`
             SELECT 
-                strftime('%w', created_at) as day_of_week,
-                strftime('%H', created_at) as hour_of_day,
-                COUNT(*) as value
-            FROM messages
-            WHERE direction = 'inbound' AND created_at > DATE('now', '-30 days')
+                strftime('%w', m.created_at) as day_of_week,
+                strftime('%H', m.created_at) as hour_of_day,
+                COUNT(m.id) as value
+            FROM messages m
+            JOIN leads l ON m.lead_id = l.id
+            WHERE m.direction = 'inbound' 
+              AND m.created_at > DATE('now', '-30 days')
+              AND l.organization_id = ?
             GROUP BY day_of_week, hour_of_day
-        `);
+        `, [req.user.organization_id]);
 
-        // Return raw rows, frontend will map to grid
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -133,34 +150,36 @@ router.get('/heatmap', async (req, res) => {
 // GET /api/analytics/roi
 router.get('/roi', async (req, res) => {
     try {
-        // 1. Calculate Revenue: Sum of lead_value for all "INTERESTED" or "CUSTOMER" leads
-        // Note: In a real app, we might link revenue to specific campaigns via attribution.
-        // For simple ROI, we'll sum value of all leads converted in last 30 days.
+        const orgId = req.user.organization_id;
+
+        // 1. Calculate Revenue
         const revenueResult = await db.query(`
             SELECT SUM(lead_value) as total_revenue
             FROM leads 
-            WHERE status IN ('INTERESTED', 'CUSTOMER')
-        `);
+            WHERE status IN ('INTERESTED', 'CUSTOMER') AND organization_id = ?
+        `, [orgId]);
         const totalRevenue = revenueResult.rows[0].total_revenue || 0;
 
-        // 2. Calculate Cost: Sum of 'spend' from all campaigns in last 30 days
-        // (Assuming we track spend). If not, we can estimate based on message count * cost per msg.
-        // Let's use the new 'spend' column.
+        // 2. Calculate Cost (Campaigns)
         const costResult = await db.query(`
             SELECT SUM(spend) as total_cost
             FROM campaigns
-        `);
+            WHERE organization_id = ?
+        `, [orgId]);
         let totalCost = costResult.rows[0].total_cost || 0;
 
-        // Fallback: If no manual spend entered, estimate cost
-        // Estimate: $0.05 per WhatsApp message
+        // Fallback: Estimate cost from messages
         if (totalCost === 0) {
-            const msgCount = await db.query("SELECT COUNT(*) as count FROM messages WHERE type='whatsapp' AND direction='outbound'");
+            const msgCount = await db.query(`
+                SELECT COUNT(m.id) as count 
+                FROM messages m
+                JOIN leads l ON m.lead_id = l.id
+                WHERE m.type='whatsapp' AND m.direction='outbound' AND l.organization_id = ?
+            `, [orgId]);
             totalCost = msgCount.rows[0].count * 0.05;
         }
 
         // 3. Calculate ROI
-        // ROI = (Revenue - Cost) / Cost * 100
         let roi = 0;
         if (totalCost > 0) {
             roi = ((totalRevenue - totalCost) / totalCost) * 100;
@@ -169,7 +188,7 @@ router.get('/roi', async (req, res) => {
         res.json({
             revenue: totalRevenue,
             cost: totalCost,
-            roi: Math.round(roi * 100) / 100 // Round to 2 decimals
+            roi: Math.round(roi * 100) / 100
         });
 
     } catch (err) {
@@ -182,15 +201,17 @@ router.get('/roi', async (req, res) => {
 router.get('/ab-test', async (req, res) => {
     try {
         const { campaignA, campaignB } = req.query;
+        const orgId = req.user.organization_id;
 
         if (!campaignA || !campaignB) {
-            // Return list of completed campaigns for selection if IPs not provided
-            // Actually, frontend might need list first. Let's handle list in /api/campaigns
-            // Here just return error or empty if not provided.
             return res.status(400).json({ error: 'Please provide campaignA and campaignB IDs' });
         }
 
         const getStats = async (id) => {
+            // Verify ownership first
+            const check = await db.query("SELECT id FROM campaigns WHERE id = ? AND organization_id = ?", [id, orgId]);
+            if (check.rows.length === 0) return null;
+
             const stats = await db.query(`
                 SELECT 
                     (SELECT COUNT(*) FROM messages WHERE campaign_id = ? AND direction='outbound') as sent,
@@ -203,6 +224,8 @@ router.get('/ab-test', async (req, res) => {
 
         const statsA = await getStats(campaignA);
         const statsB = await getStats(campaignB);
+
+        if (!statsA || !statsB) return res.status(404).json({ error: 'Campaigns not found or access denied' });
 
         res.json({
             campaignA: statsA,

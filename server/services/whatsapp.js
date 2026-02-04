@@ -10,7 +10,7 @@ class WhatsAppService {
         this.client = null;
         this.qr = null;
         this.status = 'DISCONNECTED';
-        // this.initialize(); 
+        this.initialize();
     }
 
     initialize() {
@@ -43,6 +43,10 @@ class WhatsAppService {
         this.client.on('authenticated', () => {
             console.log('WHATSAPP AUTHENTICATED');
             this.status = 'AUTHENTICATED';
+        });
+
+        this.client.on('loading_screen', (percent, message) => {
+            console.log('WHATSAPP LOADING:', percent, '%', message);
         });
 
         this.client.on('auth_failure', async () => {
@@ -92,10 +96,22 @@ class WhatsAppService {
         this.client.initialize();
     }
 
-    async sendMessage(to, content, campaignId = null) {
+    async sendMessage(to, content, options = null) {
         if (!this.client || this.status !== 'CONNECTED') {
             throw new Error('WhatsApp not connected');
         }
+
+        // Handle options (backward compat: if string/number, it's campaignId)
+        let campaignId = null;
+        let explicitLeadId = null;
+
+        if (options && typeof options === 'object') {
+            campaignId = options.campaignId;
+            explicitLeadId = options.leadId;
+        } else if (options) {
+            campaignId = options;
+        }
+
         try {
             // Ensure number format (remove +, spaces, add @c.us if missing)
             let chatId = to.replace(/\+/g, '').replace(/\s/g, '');
@@ -111,24 +127,27 @@ class WhatsAppService {
             const phone = chatId.replace('@c.us', '');
 
             // Resolve Lead ID
-            let leadId;
-            // Check for existing lead with various formats
-            const formats = [phone, `+${phone}`, `p:+${phone}`];
-            const placeholders = formats.map(() => '?').join(' OR phone = ');
-            const existing = await db.query(`SELECT id FROM leads WHERE phone = ${placeholders}`, formats);
+            let leadId = explicitLeadId;
 
-            if (existing.rows.length > 0) {
-                leadId = existing.rows[0].id;
-                console.log(`[DEBUG] Found existing lead ${leadId} for phone ${phone}`);
-                // Update Last Msg Time
-                await db.query("UPDATE leads SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = ?", [leadId]);
+            if (!leadId) {
+                // Check for existing lead with various formats
+                const formats = [phone, `+${phone}`, `p:+${phone}`];
+                const placeholders = formats.map(() => '?').join(' OR phone = ');
+                const existing = await db.query(`SELECT id FROM leads WHERE phone = ${placeholders}`, formats);
+
+                if (existing.rows.length > 0) {
+                    leadId = existing.rows[0].id;
+                    console.log(`[DEBUG] Found existing lead ${leadId} for phone ${phone}`);
+                } else {
+                    console.warn(`[BLOCKED] Attempted to send to unknown number ${phone}`);
+                    throw new Error(`Lead not found for phone ${phone}. Outbound creation disabled.`);
+                }
             } else {
-                console.warn(`[DEBUG] No lead found for ${phone}, creating stub...`);
-                leadId = randomUUID();
-                await db.query("INSERT INTO leads (id, phone, name, status) VALUES (?, ?, 'Unknown', 'NEW')", [leadId, phone]);
+                console.log(`[DEBUG] Using explicit leadId: ${leadId}`);
             }
 
-            console.log(`[DEBUG] Inserting message for lead ${leadId}`);
+            // Update Last Msg Time
+            await db.query("UPDATE leads SET last_message_sent_at = CURRENT_TIMESTAMP WHERE id = ?", [leadId]);
 
             console.log(`[DEBUG] Inserting message for lead ${leadId}`);
 
@@ -176,9 +195,8 @@ class WhatsAppService {
             if (existing.rows.length > 0) {
                 leadId = existing.rows[0].id;
             } else {
-                // Create stub lead if not exists
-                leadId = randomUUID();
-                await db.query("INSERT INTO leads (id, phone, name, status) VALUES (?, ?, 'Unknown', 'NEW')", [leadId, phone]);
+                console.warn(`[BLOCKED] Media send to unknown ${phone}`);
+                return false;
             }
 
             await db.query(
@@ -204,59 +222,94 @@ class WhatsAppService {
     }
 
     async getLiveChats() {
-        if (!this.client || this.status !== 'CONNECTED') return [];
-        try {
-            const chats = await this.client.getChats();
+        console.log(`[DEBUG] getLiveChats called. Status: ${this.status}`);
+        let liveChats = [];
 
-            // Resolve names in parallel
-            const chatsWithDetails = await Promise.all(chats.map(async c => {
-                let name = c.name;
-                // If it's not a group and no name (or name is phone number), try to get contact info
-                if (!c.isGroup) {
-                    try {
-                        const contact = await c.getContact();
-                        console.log(`[DEBUG] Chat ${c.id.user}: Name=${contact.name}, Push=${contact.pushname}, Short=${contact.shortName}`);
-                        // Priority: Saved Name -> Pushname -> ShortName -> Existing Name -> Phone
-                        name = contact.name || contact.pushname || contact.shortName || name;
+        // 1. Try fetching Live Chats from WhatsApp
+        if (this.client && (this.status === 'CONNECTED' || this.status === 'AUTHENTICATED')) {
+            try {
+                liveChats = await this.client.getChats();
+                console.log(`[DEBUG] Live chats count: ${liveChats.length}`);
 
-                        if (!name || name === c.id.user) {
-                            // Fallback to DB with robust lookup
-                            const phone = c.id.user; // Standard format from WA (no +)
-                            // Check formats
-                            const formats = [phone, `+${phone}`, `p:+${phone}`];
-                            const placeholders = formats.map(() => '?').join(' OR phone = ');
-                            const leadRes = await db.query(`SELECT name FROM leads WHERE phone = ${placeholders}`, formats);
-
-                            if (leadRes.rows.length > 0 && leadRes.rows[0].name && leadRes.rows[0].name !== 'Unknown') {
-                                name = leadRes.rows[0].name;
-                            }
-                        }
-
-                        // If we resolved a real name (not phone), update the contact stub in DB if it exists as Unknown
-                        if (name && name !== c.id.user) {
-                            const phone = c.id.user;
-                            await db.query("UPDATE leads SET name = ? WHERE phone = ? AND name = 'Unknown'", [name, phone]);
-                        }
-
-                        name = name || c.id.user;
-                    } catch (err) {
-                        console.error('Name resolve error:', err);
-                        name = name || c.id.user;
-                    }
+                if (liveChats.length === 0) {
+                    // Retry logic...
+                    await new Promise(r => setTimeout(r, 2000));
+                    liveChats = await this.client.getChats();
                 }
+            } catch (e) {
+                console.error('Error getting live chats:', e);
+            }
+        }
 
-                return {
+        // 2. Fetch Local DB Chats (Fallback & Hybrid)
+        // We want leads sorted by last_message_time or last created message
+        try {
+            // Get leads who have messages or are recently updated
+            // This is a simplified query. Ideal to join with messages table for last msg snippet.
+            // Using `last_message_sent_at` column which we update on incoming/outgoing.
+            const dbChats = await db.query(`
+                SELECT id, name, phone, last_message_sent_at 
+                FROM leads 
+                WHERE last_message_sent_at IS NOT NULL 
+                ORDER BY last_message_sent_at DESC 
+                LIMIT 50
+            `);
+
+            // If we have live chats, we merge/enrich them. 
+            // If live chats failed, we strictly use DB chats.
+
+            // Map Map DB chats to the format frontend expects
+            const detailsMap = new Map();
+
+            // Format DB Chats
+            for (const lead of dbChats.rows) {
+                // Get last message content
+                const msgRes = await db.query("SELECT content, created_at FROM messages WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1", [lead.id]);
+                const lastMsg = msgRes.rows.length > 0 ? msgRes.rows[0].content : '';
+                const timestamp = msgRes.rows.length > 0 ? new Date(msgRes.rows[0].created_at).getTime() / 1000 : 0;
+
+                // Use phone as ID to match WA serialized ID format (approx)
+                // WA ID: 123456789@c.us
+                // DB Phone: 123456789 (usually sanitized)
+
+                let waID = lead.phone;
+                if (waID && !waID.includes('@')) waID = `${waID.replace(/\+/g, '')}@c.us`;
+
+                detailsMap.set(waID, {
+                    id: waID, // Use phone as ID for frontend key
+                    name: lead.name,
+                    unreadCount: 0, // DB doesn't track unread perfectly yet
+                    timestamp: timestamp, // Unix timestamp
+                    lastMessage: lastMsg,
+                    isLocal: true,
+                    leadId: lead.id // Keep ref
+                });
+            }
+
+            // Overlay Live Chats (Priority)
+            for (const c of liveChats) {
+                const contact = await c.getContact();
+                const name = contact.name || contact.pushname || c.name || c.id.user;
+
+                detailsMap.set(c.id._serialized, {
                     id: c.id._serialized,
-                    name: name || c.id.user,
+                    name: name,
                     unreadCount: c.unreadCount,
                     timestamp: c.timestamp,
-                    lastMessage: c.lastMessage ? c.lastMessage.body : ''
-                };
-            }));
+                    lastMessage: c.lastMessage ? c.lastMessage.body : '',
+                    isLocal: false
+                });
+            }
 
-            return chatsWithDetails;
-        } catch (e) {
-            console.error('Error getting chats:', e);
+            // Convert back to array and sort
+            const unifiedChats = Array.from(detailsMap.values());
+            unifiedChats.sort((a, b) => b.timestamp - a.timestamp);
+
+            console.log(`[DEBUG] Returning ${unifiedChats.length} unified chats.`);
+            return unifiedChats;
+
+        } catch (dbError) {
+            console.error("DB Chat fetch failed", dbError);
             return [];
         }
     }
@@ -360,11 +413,8 @@ class WhatsAppService {
                     [msgTime, name, leadId]
                 );
             } else {
-                leadId = randomUUID();
-                await db.query(
-                    'INSERT INTO leads (id, name, phone, source, status, last_message_sent_at) VALUES (?, ?, ?, ?, ?, ?)',
-                    [leadId, name, phone, 'whatsapp_realtime', 'new', msgTime]
-                );
+                console.log(`[IGNORED] Message from unknown number ${phone}. Lead creation disabled.`);
+                return; // STRICT MODE: Do not create lead, do not save message
             }
 
             const direction = msg.fromMe ? 'outbound' : 'inbound';
@@ -398,8 +448,8 @@ class WhatsAppService {
     }
 
     async syncHistory() {
-        if (this.status !== 'CONNECTED') {
-            console.log('Sync attempted but not connected');
+        if (this.status !== 'CONNECTED' && this.status !== 'AUTHENTICATED') {
+            console.log('Sync attempted but not connected (Status: ' + this.status + ')');
             return { success: false, message: 'Not connected' };
         }
         console.log('Starting History Sync...');
@@ -442,11 +492,8 @@ class WhatsAppService {
                             [lastMessageTime, name, leadId]
                         );
                     } else {
-                        leadId = randomUUID();
-                        await db.query(
-                            'INSERT INTO leads (id, name, phone, source, status, last_message_sent_at) VALUES (?, ?, ?, ?, ?, ?)',
-                            [leadId, name, phone, 'whatsapp_sync', 'new', lastMessageTime]
-                        );
+                        // console.log(`[SYNC SKIP] Unknown contact ${phone}`);
+                        continue;
                     }
 
                     // fetchMessages should work fine
@@ -474,6 +521,45 @@ class WhatsAppService {
         } catch (err) {
             console.error('Critical Sync Error:', err);
             return { success: false, error: err.message };
+        }
+    }
+    async syncChatMessages(phone, leadId) {
+        if (this.status !== 'CONNECTED') return;
+        try {
+            console.log(`[SYNC] Syncing chat for ${phone} (Lead: ${leadId})`);
+
+            // Format ID
+            let chatId = phone.replace(/\D/g, '');
+            if (!chatId.includes('@')) chatId += '@c.us';
+
+            const chat = await this.client.getChatById(chatId);
+            if (!chat) {
+                console.log(`[SYNC] Chat not found for ${chatId}`);
+                return;
+            }
+
+            // Fetch limits
+            const messages = await chat.fetchMessages({ limit: 50 });
+            console.log(`[SYNC] Found ${messages.length} messages`);
+
+            for (const msg of messages) {
+                const msgTime = new Date(msg.timestamp * 1000).toISOString();
+                const direction = msg.fromMe ? 'outbound' : 'inbound';
+
+                // Check if exists
+                const msgExists = await db.query('SELECT id FROM messages WHERE lead_id = ? AND created_at = ? AND content = ?', [leadId, msgTime, msg.body]);
+
+                if (msgExists.rows.length === 0) {
+                    const { randomUUID } = require('crypto');
+                    const msgId = randomUUID();
+                    await db.query(
+                        'INSERT INTO messages (id, lead_id, type, direction, content, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [msgId, leadId, 'text', direction, msg.body, msgTime, 'read']
+                    );
+                }
+            }
+        } catch (e) {
+            console.error(`[SYNC] Failed to sync chat for ${phone}:`, e.message);
         }
     }
 }
