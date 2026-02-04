@@ -14,7 +14,7 @@ router.get('/whatsapp', async (req, res) => {
             `SELECT COUNT(m.id) as count 
              FROM messages m 
              JOIN leads l ON m.lead_id = l.id 
-             WHERE m.type = 'whatsapp' AND m.direction = 'outbound' AND l.organization_id = ?`,
+             WHERE m.direction = 'outbound' AND l.organization_id = ?`,
             [orgId]
         );
 

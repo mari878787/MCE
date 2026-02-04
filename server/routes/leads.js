@@ -35,7 +35,12 @@ router.post('/', async (req, res) => {
         // 2. Score & Tag
         const { score, tags, status } = scoreLead(standardizedLead, phoneValidation);
         standardizedLead.score = score;
-        standardizedLead.tags = tags;
+
+        // Merge calculated tags with manual tags
+        const manualTags = Array.isArray(rawData.tags) ? rawData.tags :
+            (typeof rawData.tags === 'string' ? rawData.tags.split(',').map(t => t.trim()) : []);
+
+        standardizedLead.tags = [...new Set([...tags, ...manualTags])];
         standardizedLead.status = rawData.status || status; // Allow manual status override
 
         // 1.5 Check Duplicates (Scoped to Org)

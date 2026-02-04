@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, MessageSquare, Clock } from 'lucide-react';
 
 interface CreateCampaignModalProps {
     onClose: () => void;
     onCreated: () => void;
+    campaignId?: string; // If present, entering Edit Mode
 }
 
 interface Step {
@@ -13,10 +14,49 @@ interface Step {
     content: string;
 }
 
-export default function CreateCampaignModal({ onClose, onCreated }: CreateCampaignModalProps) {
+export default function CreateCampaignModal({ onClose, onCreated, campaignId }: CreateCampaignModalProps) {
     const [name, setName] = useState('');
+    const [targetType, setTargetType] = useState<'ALL' | 'TAG' | 'STATUS'>('ALL');
+    const [targetValue, setTargetValue] = useState('');
     const [steps, setSteps] = useState<Step[]>([]);
     const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(false);
+
+    useEffect(() => {
+        if (campaignId) {
+            setFetching(true);
+            const token = localStorage.getItem('token');
+            fetch(`http://localhost:5000/api/campaigns/${campaignId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Failed to load campaign');
+                        onClose();
+                        return;
+                    }
+                    setName(data.name);
+                    // Parse target
+                    if (data.target_filter && data.target_filter.startsWith('TAG:')) {
+                        setTargetType('TAG');
+                        setTargetValue(data.target_filter.replace('TAG:', ''));
+                    } else if (data.target_filter && data.target_filter.startsWith('STATUS:')) {
+                        setTargetType('STATUS');
+                        setTargetValue(data.target_filter.replace('STATUS:', ''));
+                    } else {
+                        setTargetType('ALL');
+                    }
+                    // Map steps from DB format if needed (DB has lower case usually, ensures type matches)
+                    setSteps(data.steps.map((s: any) => ({ type: s.type, content: s.content })));
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Error loading campaign details');
+                })
+                .finally(() => setFetching(false));
+        }
+    }, [campaignId, onClose]);
 
     const addStep = (type: 'WHATSAPP' | 'DELAY') => {
         setSteps([...steps, { type, content: '' }]);
@@ -37,25 +77,49 @@ export default function CreateCampaignModal({ onClose, onCreated }: CreateCampai
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:5000/api/campaigns', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, steps })
+            const url = campaignId
+                ? `http://localhost:5000/api/campaigns/${campaignId}`
+                : 'http://localhost:5000/api/campaigns';
+
+            const method = campaignId ? 'PUT' : 'POST';
+            const token = localStorage.getItem('token');
+
+            const finalTarget = targetType === 'TAG' ? `TAG:${targetValue}` : targetType === 'STATUS' ? `STATUS:${targetValue}` : 'ALL';
+
+            const res = await fetch(url, {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ name, steps, target_filter: finalTarget })
             });
 
             if (res.ok) {
                 onCreated();
                 onClose();
             } else {
-                alert('Failed to create campaign');
+                const err = await res.json();
+                alert('Failed to save campaign: ' + (err.error || 'Unknown error'));
             }
         } catch (error) {
             console.error(error);
-            alert('Error creating campaign');
+            alert('Error saving campaign');
         } finally {
             setLoading(false);
         }
     };
+
+    if (fetching) {
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                <div className="bg-card w-full max-w-sm p-8 rounded-xl flex flex-col items-center">
+                    <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mb-4"></div>
+                    <p className="text-muted-foreground">Loading campaign...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -63,7 +127,7 @@ export default function CreateCampaignModal({ onClose, onCreated }: CreateCampai
 
                 {/* Header */}
                 <div className="p-6 border-b border-border flex justify-between items-center bg-secondary/30">
-                    <h2 className="text-2xl font-bold text-foreground">Create New Campaign</h2>
+                    <h2 className="text-2xl font-bold text-foreground">{campaignId ? 'Edit Campaign' : 'Create New Campaign'}</h2>
                     <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                         <X size={24} />
                     </button>
@@ -82,6 +146,72 @@ export default function CreateCampaignModal({ onClose, onCreated }: CreateCampai
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                         />
+                    </div>
+
+                    {/* Target Audience */}
+                    <div>
+                        <label className="block text-sm font-medium text-muted-foreground mb-2">Target Audience</label>
+                        <div className="flex gap-4 mb-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="targetType"
+                                    checked={targetType === 'ALL'}
+                                    onChange={() => setTargetType('ALL')}
+                                    className="accent-primary"
+                                />
+                                <span className="text-sm text-foreground">All Leads</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="targetType"
+                                    checked={targetType === 'TAG'}
+                                    onChange={() => setTargetType('TAG')}
+                                    className="accent-primary"
+                                />
+                                <span className="text-sm text-foreground">By Tag</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="targetType"
+                                    checked={targetType === 'STATUS'}
+                                    onChange={() => {
+                                        setTargetType('STATUS');
+                                        setTargetValue('NEW');
+                                    }}
+                                    className="accent-primary"
+                                />
+                                <span className="text-sm text-foreground">By Status</span>
+                            </label>
+                        </div>
+
+                        {targetType === 'TAG' && (
+                            <input
+                                type="text"
+                                className="w-full bg-input/50 border border-input rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-primary transition-colors text-sm"
+                                placeholder="Enter tag (e.g. #VIP)"
+                                value={targetValue}
+                                onChange={(e) => setTargetValue(e.target.value)}
+                            />
+                        )}
+
+                        {targetType === 'STATUS' && (
+                            <select
+                                className="w-full bg-input/50 border border-input rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-primary transition-colors text-sm appearance-none"
+                                value={targetValue}
+                                onChange={(e) => setTargetValue(e.target.value)}
+                            >
+                                <option value="NEW">New</option>
+                                <option value="CONTACTED">Contacted</option>
+                                <option value="INTERESTED">Interested</option>
+                                <option value="VIP">VIP</option>
+                                <option value="CLOSED">Closed</option>
+                                <option value="WON">Won</option>
+                                <option value="LOST">Lost</option>
+                            </select>
+                        )}
                     </div>
 
                     {/* Steps Builder */}
@@ -172,7 +302,7 @@ export default function CreateCampaignModal({ onClose, onCreated }: CreateCampai
                         disabled={loading || !name || steps.length === 0}
                         className="px-6 py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground rounded-lg text-sm font-bold shadow-lg shadow-primary/20 transition-all"
                     >
-                        {loading ? 'Creating...' : 'Create Campaign'}
+                        {loading ? 'Saving...' : campaignId ? 'Save Changes' : 'Create Campaign'}
                     </button>
                 </div>
 

@@ -161,6 +161,17 @@ export default function CreateLeadModal({ isOpen, onClose, onSuccess, initialDat
                         </select>
                     </div>
 
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tags (comma separated)</label>
+                        <input
+                            type="text"
+                            className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            placeholder="e.g. #VIP, #Interested"
+                            value={formData.tags.join(', ')}
+                            onChange={e => setFormData({ ...formData, tags: e.target.value.split(',').map(t => t.trim()) })}
+                        />
+                    </div>
+
                     <div className="pt-4 flex justify-end gap-3">
                         <button
                             type="button"

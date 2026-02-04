@@ -7,10 +7,12 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Initialize Database
+
+// Initialize Database
 initDb();
 
 // Initialize Background Workers
-// require('./workers/automation'); // Loading this later to assume DB is ready
+require('./workers/automation'); // Loading this later to assume DB is ready
 
 app.use(cors());
 app.use(express.json());

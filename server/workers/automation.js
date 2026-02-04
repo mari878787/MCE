@@ -42,7 +42,6 @@ const processJob = async (jobData) => {
             return;
         }
 
-        // --- B. WORKFLOW BATCH POLLING (Scheduled) ---
         if (type === 'POLL_WORKFLOWS') {
             const now = new Date().toISOString();
             // Find WAITING executions that are due
@@ -56,6 +55,41 @@ const processJob = async (jobData) => {
                 for (const row of dueRes.rows) {
                     await workflowEngine.process(row.workflow_id, row.lead_id, row.id);
                 }
+            }
+            return;
+        }
+
+        // --- C. CAMPAIGN POLLING (New) ---
+        if (type === 'POLL_CAMPAIGNS') {
+            // 1. Fetch Running Campaigns
+            const activeCampaigns = await db.query("SELECT * FROM campaigns WHERE status = 'RUNNING'");
+            for (const camp of activeCampaigns.rows) {
+                // 2. Find eligible active leads NOT in audience
+                // Simplification for MVP: If target_filter is 'ALL' or empty, select all leads.
+                // Exclude leads that have stopped automation.
+                const newLeadsRes = await db.query(`
+                    SELECT l.id FROM leads l
+                    LEFT JOIN campaign_audience ca ON l.id = ca.lead_id AND ca.campaign_id = ?
+                    WHERE l.stopped_automation = 0 
+                    AND ca.id IS NULL
+                `, [camp.id]);
+
+                const newLeads = newLeadsRes.rows;
+                if (newLeads.length > 0) {
+                    console.log(`[CAMPAIGN POLL] Found ${newLeads.length} new leads for '${camp.name}'. Adding...`);
+                    for (const lead of newLeads) {
+                        await db.query(
+                            'INSERT INTO campaign_audience (id, campaign_id, lead_id, current_step, status, next_run_at) VALUES (?, ?, ?, ?, ?, datetime("now"))',
+                            [uuidv4(), camp.id, lead.id, 1, 'PENDING']
+                        );
+                    }
+                }
+
+                // 3. Trigger processing for this campaign (whether new leads added or not, to keep the queue moving)
+                // We directly call processJob logic or re-queue. Re-queueing is cleaner.
+                // BUT, since we are inside the worker, we can just "fall through" or explicitly check existing audience.
+                // Let's explicitly trigger batch processing to ensure immediate action.
+                await processJob({ type: 'PROCESS_CAMPAIGN_BATCH', campaignId: camp.id });
             }
             return;
         }
@@ -101,8 +135,8 @@ const processJob = async (jobData) => {
                         await whatsappService.sendMessage(lead.phone, content);
 
                         await db.query(
-                            "INSERT INTO messages (id, lead_id, type, direction, content, timestamp) VALUES (?, ?, ?, ?, ?, datetime('now'))",
-                            [uuidv4(), lead.id, 'whatsapp', 'outbound', content]
+                            "INSERT INTO messages (id, lead_id, type, direction, content, timestamp, campaign_id) VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
+                            [uuidv4(), lead.id, 'whatsapp', 'outbound', content, campaignId]
                         );
 
                         const nextStep = item.current_step + 1;
@@ -122,8 +156,15 @@ const processJob = async (jobData) => {
                         );
                     }
                 } catch (err) {
+                    const isConnectionError = err.message.includes('WhatsApp not connected') || err.message.includes('Session closed');
                     console.error(`[CAMPAIGN FAIL] Lead ${lead.phone}: ${err.message}`);
-                    await db.query("UPDATE campaign_audience SET status = 'FAILED', error_message = ? WHERE id = ?", [err.message, item.id]);
+
+                    if (isConnectionError) {
+                        console.log(`[RETRY] Connection issue for ${lead.phone}. Retrying in 1 minute.`);
+                        await db.query("UPDATE campaign_audience SET next_run_at = datetime('now', '+1 minute') WHERE id = ?", [item.id]);
+                    } else {
+                        await db.query("UPDATE campaign_audience SET status = 'FAILED', error_message = ? WHERE id = ?", [err.message, item.id]);
+                    }
                 }
             }
             return;
@@ -170,6 +211,31 @@ if (nurtureQueue.on) {
 } else {
     // Fallback if queue is weird
     console.warn('[WORKER] Queue does not support events?');
+}
+
+// ------------------------------------------------------------------
+// INIT: Start Polling Loops
+// ------------------------------------------------------------------
+let hasStarted = false;
+if (!hasStarted) {
+    hasStarted = true;
+
+    // Poll for Campaigns & New Leads every 30 seconds
+    setInterval(() => {
+        processJob({ type: 'POLL_CAMPAIGNS' }).catch(console.error);
+    }, 30000);
+
+    // Poll for Workflows every 60 seconds
+    setInterval(() => {
+        processJob({ type: 'POLL_WORKFLOWS' }).catch(console.error);
+    }, 60000);
+
+    console.log('[WORKER] Polling loops started (Campaigns: 30s, Workflows: 60s)');
+
+    // Initial run to kickstart immediately
+    setTimeout(() => {
+        processJob({ type: 'POLL_CAMPAIGNS' }).catch(console.error);
+    }, 5000);
 }
 
 module.exports = {};

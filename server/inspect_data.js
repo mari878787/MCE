@@ -1,23 +1,19 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const dbPath = path.resolve(__dirname, 'db/mce.db');
-const db = new sqlite3.Database(dbPath);
+const db = require('./db');
 
-db.serialize(() => {
-    db.all("SELECT id, name, phone, source FROM leads", (err, leads) => {
-        if (err) console.error(err);
-        else {
-            console.log('--- LEADS ---');
-            console.table(leads);
-        }
+async function inspect() {
+    console.log('\n--- LEADS ---');
+    const leads = await db.query('SELECT id, name, phone, stopped_automation FROM leads');
+    console.log(JSON.stringify(leads.rows, null, 2));
 
-        db.all("SELECT id, lead_id, content, status, created_at FROM messages ORDER BY created_at DESC LIMIT 5", (err, msgs) => {
-            if (err) console.error(err);
-            else {
-                console.log('--- RECENT MESSAGES ---');
-                console.table(msgs);
-            }
-            db.close();
-        });
-    });
-});
+    console.log('\n--- CAMPAIGNS ---');
+    const campaigns = await db.query('SELECT id, name, status FROM campaigns');
+    console.log(JSON.stringify(campaigns.rows, null, 2));
+
+    console.log('\n--- CAMPAIGN AUDIENCE ---');
+    if (campaigns.rows.length > 0) {
+        const aud = await db.query('SELECT * FROM campaign_audience');
+        console.log(JSON.stringify(aud.rows, null, 2));
+    }
+}
+
+inspect().catch(console.error);
