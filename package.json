@@ -1,9 +1,31 @@
 {
+  "name": "mce",
+  "version": "1.0.0",
+  "description": "Marketing Conversion Engine - Full Stack Application",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "cd server && node index.js",
+    "start": "cd server && node index.js",
+    "build": "cd client && npm install && npm run build",
+    "install:all": "cd client && npm install && cd ../server && npm install",
+    "postinstall": "cd client && npm install && cd ../server && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.561.0",
     "tailwind-merge": "^3.4.0"
-  }
+  },
+  "keywords": [
+    "marketing",
+    "whatsapp",
+    "crm",
+    "automation"
+  ],
+  "author": "mari878787",
+  "license": "ISC"
 }
