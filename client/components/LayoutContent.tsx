@@ -9,10 +9,13 @@ import { useAuth } from '@/context/AuthContext';
 export default function LayoutContent({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const { user, isLoading } = useAuth();
-    const isLoginPage = pathname === '/login';
+
+    // Public pages that should NOT show sidebar/header
+    const publicRoutes = ['/', '/login', '/signup', '/landing'];
+    const isPublicPage = publicRoutes.includes(pathname);
 
     // While loading auth state, show nothing or a spinner to prevent flash
-    if (isLoading) {
+    if (isLoading && !isPublicPage) {
         return (
             <div className="flex h-screen w-full items-center justify-center bg-background text-muted-foreground">
                 Loading...
@@ -20,7 +23,8 @@ export default function LayoutContent({ children }: { children: React.ReactNode 
         );
     }
 
-    if (isLoginPage) {
+    // Public pages render without sidebar/header
+    if (isPublicPage) {
         return <>{children}</>;
     }
 
