@@ -2,10 +2,10 @@
   "name": "mce",
   "version": "1.0.0",
   "description": "Marketing Conversion Engine - Full Stack Application",
-  "main": "server/index.js",
+  "main": "index.js",
   "scripts": {
-    "dev": "cd server && node index.js",
-    "start": "cd server && node index.js",
+    "dev": "node index.js",
+    "start": "node index.js",
     "build": "cd client && npm install && npm run build",
     "install:all": "cd client && npm install && cd ../server && npm install",
     "postinstall": "cd client && npm install && cd ../server && npm install"
